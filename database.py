@@ -24,7 +24,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 def get_user(user_id: int):
     """Obtiene datos de un usuario por su ID de Telegram."""
     try:
-        response = supabase.table("users2").select("*").eq("user_id", user_id).execute()
+        response = supabase.table("users3").select("*").eq("user_id", user_id).execute()
         data = response.data
         return data[0] if data else None
     except Exception as e:
@@ -46,7 +46,7 @@ def add_user(user_id: int, referred_by=None, initial_points=0):
         "priority_level": 2 # Prioridad por defecto: 2 (Normal/Baja), debe coincidir con el DEFAULT en SQL
     }
     try:
-        response = supabase.table("users2").insert(data).execute()
+        response = supabase.table("users3").insert(data).execute()
         if response.data:
             logging.info(f"Usuario {user_id} añadido a la BD. Puntos: {initial_points}, Prioridad: 2.")
             return True
@@ -65,7 +65,7 @@ def update_user_points(user_id: int, amount: int):
 
     new_points = user["points"] + amount
     try:
-        response = supabase.table("users2").update({"points": new_points}).eq("user_id", user_id).execute()
+        response = supabase.table("users3").update({"points": new_points}).eq("user_id", user_id).execute()
         if response.data:
             logging.info(f"Puntos de usuario {user_id} actualizados en {amount} (total: {new_points}).")
             return response.data[0] # Retorna el usuario actualizado
@@ -100,7 +100,7 @@ def update_user_priority(user_id: int, new_priority_level: int):
     
     if new_priority_level < current_priority: # Si la nueva prioridad es MENOR (más alta)
         try:
-            response = supabase.table("users2").update({'priority_level': new_priority_level}).eq('user_id', user_id).execute()
+            response = supabase.table("users3").update({'priority_level': new_priority_level}).eq('user_id', user_id).execute()
             if response.data:
                 logging.info(f"Prioridad del usuario {user_id} actualizada de {current_priority} a {new_priority_level}.")
                 return True
@@ -130,7 +130,7 @@ async def add_generation_job(user_id: int, chat_id: int, message_id: int, filepa
         'priority_level': priority_level
     }
     try:
-        response = supabase.table("generation_queue2").insert(job_data).execute()
+        response = supabase.table("generation_queue3").insert(job_data).execute()
         if response.data:
             logging.info(f"Trabajo de generación para {user_id} añadido a la cola persistente con prioridad {priority_level}. ID: {response.data[0]['id']}.")
             return response.data[0]['id'] # Retorna el ID UUID del trabajo insertado
@@ -149,7 +149,7 @@ async def get_next_generation_job():
         # 1. Seleccionar el trabajo más prioritario y más antiguo que esté 'pending'
         # Usamos .rpc('get_next_job_and_mark_processing') si tuvieras una función RPC para esto,
         # pero para el estilo actual, lo haremos en dos pasos.
-        response = supabase.table("generation_queue2") \
+        response = supabase.table("generation_queue3") \
             .select('*') \
             .eq('status', 'pending') \
             .order('priority_level', asc=True) \
@@ -165,7 +165,7 @@ async def get_next_generation_job():
 
         # 2. Intentar actualizar el estado a 'processing' de forma transaccional/atómica
         # Se usa 'eq('status', 'pending')' para asegurar que solo se actualice si el estado aún es 'pending'.
-        update_response = supabase.table("generation_queue2") \
+        update_response = supabase.table("generation_queue3") \
             .update({'status': 'processing', 'started_at': datetime.now().isoformat()}) \
             .eq('id', job_id) \
             .eq('status', 'pending') \
@@ -201,7 +201,7 @@ async def update_generation_job_status(job_id: str, status: str, output_files_ur
 
 
     try:
-        response = supabase.table("generation_queue2").update(update_data).eq('id', job_id).execute()
+        response = supabase.table("generation_queue3").update(update_data).eq('id', job_id).execute()
         if response.data:
             logging.info(f"Estado del trabajo {job_id} actualizado a {status}.")
         else:
@@ -215,7 +215,7 @@ async def get_uncompleted_processing_jobs():
     (ej. por un crash del worker), para que puedan ser marcados como fallidos y se reembolsen.
     """
     try:
-        response = supabase.table("generation_queue2") \
+        response = supabase.table("generation_queue3") \
             .select('id, user_id, chat_id, filepath, selected_workflow_name') \
             .eq('status', 'processing') \
             .execute()
