@@ -41,7 +41,7 @@ POINT_PACKAGES = {
     # 3.99 USD (aprox 70.00 MXN) -> 7000 centavos de Peso
     "p200": {"label": "500 points", "amount": 8000, "points": 500, "priority_boost": 1}, 
     # 9.99 USD (aprox 175.00 MXN) -> 17500 centavos de Peso
-    "p500": {"label": "2000 points", "amount": 1800, "points": 2000, "priority_boost": 1}, 
+    "p500": {"label": "2000 points", "amount": 18000, "points": 2000, "priority_boost": 1}, 
     # 19.99 USD (aprox 350.00 MXN) -> 35000 centavos de Peso
     "p1000": {"label": "5000 points", "amount": 40000, "points": 5000, "priority_boost": 1}
 }
