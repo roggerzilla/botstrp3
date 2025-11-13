@@ -38,11 +38,13 @@ if not bot:
 # Valores 'priority_boost' MÁS BAJOS indican MAYOR prioridad.
 # Asegúrate de que esta definición de POINT_PACKAGES esté sincronizada con points_handlers.py en tu bot
 POINT_PACKAGES = {
-    "p200": {"label": "500 points", "amount": 399, "points": 500, "priority_boost": 1},  # Prioridad Normal
-    "p500": {"label": "2000 points", "amount": 999, "points": 2000, "priority_boost": 1},  # Alta Prioridad
-    "p1000": {"label": "5000 points", "amount": 1999, "points": 5000, "priority_boost": 1} # Muy Alta Prioridad
+    # 3.99 USD (aprox 70.00 MXN) -> 7000 centavos de Peso
+    "p200": {"label": "500 points", "amount": 8000, "points": 500, "priority_boost": 1}, 
+    # 9.99 USD (aprox 175.00 MXN) -> 17500 centavos de Peso
+    "p500": {"label": "2000 points", "amount": 1800, "points": 2000, "priority_boost": 1}, 
+    # 19.99 USD (aprox 350.00 MXN) -> 35000 centavos de Peso
+    "p1000": {"label": "5000 points", "amount": 40000, "points": 5000, "priority_boost": 1}
 }
-
 # --- CAMBIO 1: Define el identificador único para este proyecto ---
 # Esto es crucial para el filtrado de webhooks.
 PROJECT_IDENTIFIER = "videos2hotbot" # <--- ¡IMPORTANTE! Este es el identificador para el backend de "Monkeyvideos"
@@ -76,7 +78,7 @@ async def crear_sesion(request: Request):
             
             line_items=[{
                 "price_data": {
-                    "currency": "usd",
+                    "currency": "mxn",
                     "unit_amount": paquete["amount"],
                     "product_data": {
                         "name": paquete["label"]
