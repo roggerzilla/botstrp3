@@ -24,7 +24,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 def get_user(user_id: int):
     """Obtiene datos de un usuario por su ID de Telegram."""
     try:
-        response = supabase.table("users3").select("*").eq("user_id", user_id).execute()
+        response = supabase.table("usersv2v").select("*").eq("user_id", user_id).execute()
         data = response.data
         return data[0] if data else None
     except Exception as e:
@@ -38,15 +38,14 @@ def add_user(user_id: int, referred_by=None, initial_points=0):
         logging.warning(f"Usuario {user_id} ya existe. Saltando adición.")
         return False
 
-    # created_at ya no es necesario aquí si la columna en DB tiene DEFAULT NOW()
     data = {
         "user_id": user_id,
         "points": initial_points,
         "referred_by": referred_by,
-        "priority_level": 2 # Prioridad por defecto: 2 (Normal/Baja), debe coincidir con el DEFAULT en SQL
+        "priority_level": 2  # Prioridad por defecto: 2 (Normal/Baja)
     }
     try:
-        response = supabase.table("users3").insert(data).execute()
+        response = supabase.table("usersv2v").insert(data).execute()
         if response.data:
             logging.info(f"Usuario {user_id} añadido a la BD. Puntos: {initial_points}, Prioridad: 2.")
             return True
@@ -57,18 +56,21 @@ def add_user(user_id: int, referred_by=None, initial_points=0):
         return False
 
 def update_user_points(user_id: int, amount: int):
-    """Actualiza los puntos de un usuario."""
+    """Actualiza los puntos de un usuario. Si no existe, lo crea con esos puntos."""
     user = get_user(user_id)
     if not user:
-        logging.warning(f"Usuario {user_id} no encontrado para actualizar puntos.")
-        return None
+        # Hardening: si el comprador no existe aún en la tabla, lo creamos
+        # para que la compra NUNCA se pierda.
+        logging.warning(f"Usuario {user_id} no encontrado. Creándolo con {amount} puntos.")
+        add_user(user_id, initial_points=amount)
+        return {"user_id": user_id, "points": amount}
 
     new_points = user["points"] + amount
     try:
-        response = supabase.table("users3").update({"points": new_points}).eq("user_id", user_id).execute()
+        response = supabase.table("usersv2v").update({"points": new_points}).eq("user_id", user_id).execute()
         if response.data:
             logging.info(f"Puntos de usuario {user_id} actualizados en {amount} (total: {new_points}).")
-            return response.data[0] # Retorna el usuario actualizado
+            return response.data[0]
         logging.error(f"Error al actualizar puntos para el usuario {user_id}: {response.json()}.")
         return None
     except Exception as e:
@@ -83,7 +85,6 @@ def get_user_points(user_id: int) -> int:
 def get_user_priority(user_id: int) -> int:
     """Obtiene el nivel de prioridad actual de un usuario."""
     user = get_user(user_id)
-    # Asume que 'priority_level' existe si el usuario existe, si no, usa el default 2
     return user.get("priority_level", 2) if user else 2
 
 def update_user_priority(user_id: int, new_priority_level: int):
@@ -96,11 +97,11 @@ def update_user_priority(user_id: int, new_priority_level: int):
         logging.warning(f"Usuario {user_id} no encontrado para actualizar prioridad.")
         return False
 
-    current_priority = user.get("priority_level", 2) # Obtener la prioridad actual del objeto user
-    
-    if new_priority_level < current_priority: # Si la nueva prioridad es MENOR (más alta)
+    current_priority = user.get("priority_level", 2)
+
+    if new_priority_level < current_priority:
         try:
-            response = supabase.table("users3").update({'priority_level': new_priority_level}).eq('user_id', user_id).execute()
+            response = supabase.table("usersv2v").update({'priority_level': new_priority_level}).eq('user_id', user_id).execute()
             if response.data:
                 logging.info(f"Prioridad del usuario {user_id} actualizada de {current_priority} a {new_priority_level}.")
                 return True
@@ -115,25 +116,21 @@ def update_user_priority(user_id: int, new_priority_level: int):
 
 # --- Funciones para la tabla 'generation_queue' ---
 async def add_generation_job(user_id: int, chat_id: int, message_id: int, filepath: str, workflow_content: dict, selected_workflow_name: str, priority_level: int):
-    """
-    Añade un trabajo de generación a la cola persistente en Supabase.
-    Almacena el workflow_content como un string JSON.
-    """
     job_data = {
         'user_id': user_id,
         'chat_id': chat_id,
         'message_id': message_id,
         'filepath': filepath,
-        'workflow_content': json.dumps(workflow_content), # Se serializa a JSON string para la BD
+        'workflow_content': json.dumps(workflow_content),
         'selected_workflow_name': selected_workflow_name,
         'status': 'pending',
         'priority_level': priority_level
     }
     try:
-        response = supabase.table("generation_queue3").insert(job_data).execute()
+        response = supabase.table("generation_queuev2v").insert(job_data).execute()
         if response.data:
-            logging.info(f"Trabajo de generación para {user_id} añadido a la cola persistente con prioridad {priority_level}. ID: {response.data[0]['id']}.")
-            return response.data[0]['id'] # Retorna el ID UUID del trabajo insertado
+            logging.info(f"Trabajo de generación para {user_id} añadido a la cola con prioridad {priority_level}. ID: {response.data[0]['id']}.")
+            return response.data[0]['id']
         logging.error(f"Error al añadir trabajo de generación: {response.json()}.")
         return None
     except Exception as e:
@@ -141,15 +138,8 @@ async def add_generation_job(user_id: int, chat_id: int, message_id: int, filepa
         return None
 
 async def get_next_generation_job():
-    """
-    Obtiene el siguiente trabajo de la cola con la prioridad más alta (menor número)
-    y el 'created_at' más antiguo, y lo marca como 'processing' de forma atómica.
-    """
     try:
-        # 1. Seleccionar el trabajo más prioritario y más antiguo que esté 'pending'
-        # Usamos .rpc('get_next_job_and_mark_processing') si tuvieras una función RPC para esto,
-        # pero para el estilo actual, lo haremos en dos pasos.
-        response = supabase.table("generation_queue3") \
+        response = supabase.table("generation_queuev2v") \
             .select('*') \
             .eq('status', 'pending') \
             .order('priority_level', asc=True) \
@@ -158,14 +148,12 @@ async def get_next_generation_job():
             .execute()
 
         if not response.data:
-            return None # No hay trabajos pendientes en la cola
+            return None
 
         job = response.data[0]
         job_id = job['id']
 
-        # 2. Intentar actualizar el estado a 'processing' de forma transaccional/atómica
-        # Se usa 'eq('status', 'pending')' para asegurar que solo se actualice si el estado aún es 'pending'.
-        update_response = supabase.table("generation_queue3") \
+        update_response = supabase.table("generation_queuev2v") \
             .update({'status': 'processing', 'started_at': datetime.now().isoformat()}) \
             .eq('id', job_id) \
             .eq('status', 'pending') \
@@ -173,11 +161,9 @@ async def get_next_generation_job():
 
         if update_response.data:
             logging.info(f"Trabajo {job_id} marcado como 'processing'.")
-            # Deserializar 'workflow_content' de JSON string a dict antes de retornar
             job['workflow_content'] = json.loads(job['workflow_content'])
             return job
         else:
-            # Si no se pudo actualizar (ej. otro worker lo tomó justo antes), se loguea y se devuelve None.
             logging.warning(f"Trabajo {job_id} ya fue tomado o su estado cambió. Reintentando la búsqueda...")
             return None
 
@@ -186,22 +172,17 @@ async def get_next_generation_job():
         return None
 
 async def update_generation_job_status(job_id: str, status: str, output_files_urls: list = None, error_message: str = None):
-    """
-    Actualiza el estado de un trabajo de generación en la cola persistente.
-    Permite establecer 'completed', 'failed', 'refunded', 'canceled'.
-    """
     update_data = {'status': status}
     if status == 'completed':
         update_data['completed_at'] = datetime.now().isoformat()
         if output_files_urls:
-            update_data['output_files_urls'] = json.dumps(output_files_urls) # Serializa la lista de URLs a JSON string
-    elif status in ('failed', 'refunded', 'canceled'): # Estados que indican que el trabajo ya no está activo/pendiente
+            update_data['output_files_urls'] = json.dumps(output_files_urls)
+    elif status in ('failed', 'refunded', 'canceled'):
         update_data['error_message'] = error_message
-        update_data['completed_at'] = datetime.now().isoformat() # Marcar como completado (con fallo/reembolso/cancelado)
-
+        update_data['completed_at'] = datetime.now().isoformat()
 
     try:
-        response = supabase.table("generation_queue3").update(update_data).eq('id', job_id).execute()
+        response = supabase.table("generation_queuev2v").update(update_data).eq('id', job_id).execute()
         if response.data:
             logging.info(f"Estado del trabajo {job_id} actualizado a {status}.")
         else:
@@ -210,16 +191,12 @@ async def update_generation_job_status(job_id: str, status: str, output_files_ur
         logging.error(f"Error en update_generation_job_status para {job_id}: {e}.")
 
 async def get_uncompleted_processing_jobs():
-    """
-    Recupera trabajos que quedaron en estado 'processing' de una sesión anterior
-    (ej. por un crash del worker), para que puedan ser marcados como fallidos y se reembolsen.
-    """
     try:
-        response = supabase.table("generation_queue3") \
+        response = supabase.table("generation_queuev2v") \
             .select('id, user_id, chat_id, filepath, selected_workflow_name') \
             .eq('status', 'processing') \
             .execute()
-        
+
         if response.data:
             logging.warning(f"Encontrados {len(response.data)} trabajos en estado 'processing' no completados tras un reinicio.")
         return response.data
